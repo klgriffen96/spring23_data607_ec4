@@ -1,0 +1,287 @@
+---
+title: "Nobel Prize Extra Credit"
+author: "Kayleah Griffen"
+date: "3/20/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The Nobelprize.org offers open data containing information about who has been awarded the Nobel Prize, when, in what prize category and the motivation, as well as basic information about the Nobel Laureates such as birth data and the affiliation at the time of the award. The data is currently available from 1901 - 2022. The categories that the Nobel Prize has been awarded in are physics, chemistry, medicine, peace, literature or economics. The objective of this extra credit assignment is to work with the two JSON files available through the API at nobelprize.org, ask and answer 4 interesting questions about the data. The four questions I decided to ask are:
+
+1) How has the gender breakdown changed over time for Nobel Laureates?
+2) How has the average age changed over time for Nobel Laureates, by category?
+3) What affiliation has the most Nobel Laureates?
+4) For each category that the Nobel Prize was awarded in, what is the most and the least amount of shares there has been?
+
+
+## Data Aquisition through API
+
+Load the required packages.
+
+```{r, warning=FALSE, message=FALSE}
+library(jsonlite)
+library(tidyverse)
+library(kableExtra)
+```
+
+The API allows for you to filter by any of the categories they provide, for prize you can filter by year for example and for laureates data you can filter by gender for example. In my case I am interested in comparing awards for all years and for all laureates, so I opted to use two pulls that would get me all of the data.
+
+Pull all of the available data on the prize winners.
+
+```{r}
+baseURL  <- "http://api.nobelprize.org/v1/prize.json"
+prize <- fromJSON(baseURL)
+```
+
+Taking a look at the prize data, `prize` contains a dataframe, `prizes`, that has four columns, `year`, `category`, `laureates`, and `overallMotivation`. `laureates` is a list of dataframes where there is one dataframe for each set of laureates - which could represent one or could be more than one laureates. 
+
+Pull all of the laureates data.
+
+```{r}
+baseURL  <- "http://api.nobelprize.org/v1/laureate.json"
+laur <- fromJSON(baseURL)
+```
+
+Taking a look at the laureates data, `laur` contains a dataframe, `laureates`, which has thirteen columns. Each column gives specific information about one of the laureates. One column of interest is the `prizes` which is a list of dataframes where each dataframe contains all of the Nobel awards that laureate won.
+
+## Data Analysis
+
+To conduct the analysis to answer the four questions I created, I will need to pull relevant information from both the `prize$prizes` and `laur$laureates` dataframes. 
+
+### Gender Analysis
+
+In order to analyze gender breakdown over time I am interested in every year, every category, the number of women and number of men represented.
+
+```{r}
+# initialize data frame for relevant info
+df <- data.frame(year = integer(),
+                 category = character(),
+                 f_total = integer(),
+                 m_total = integer())
+
+for (i in 1:dim(prize$prizes)[1]){
+  # initialize counters
+  f_total <- 0
+  m_total <- 0
+  
+  # extract laureates dataframe
+  df_l <- prize$prizes$laureates[[i]]
+  
+  # check if no laureates that year/category
+  if (is_null(df_l[[1]]) == FALSE){
+    
+    # loop through all laureates that year/category
+    for (ii in 1:dim(df_l)[1]){
+      
+      # extract id of laureate
+      id <- df_l$id[ii]
+      
+      # find the gender of laureate
+      df_ii <- laur$laureates[which(laur$laureates$id == id), ]
+      
+      # increment count
+      if (df_ii$gender == "male"){
+        m_total <- m_total + 1
+      } else {
+        f_total <- f_total + 1
+      }
+    }
+    # bind to dataframe
+    df_temp <- data.frame(year = as.integer(prize$prizes$year[i]),
+                          category = prize$prizes$category[i],
+                          f_total = f_total,
+                          m_total = m_total)
+    df <- rbind(df, df_temp)
+  }
+}
+```
+
+Now that all of the relevant information is saved, create a yearly summary.
+
+```{r}
+df_s <- df |> group_by(year) |>
+      summarise(f_year = sum(f_total),
+                m_year = sum(m_total)) |>
+      mutate(f_ratio = (f_year)/(f_year+m_year))
+```
+
+Make a plot of the yearly summary.
+
+```{r}
+df_s |> ggplot(aes(x=year, y=f_ratio)) + 
+        geom_smooth(method = 'loess', formula = 'y ~ x') +
+        geom_point() + 
+        labs(title="Ratio of Female Nobel Laureates", x="Year", y = "Ratio")
+        
+         
+```
+
+From this plot it is notable that from 1900-1975 there are several years where there were no female Nobel Laureates. After 1975 the female representation began to steadily increase. Females have never been, for any year - the majority of Nobel Laureates.
+
+### Age Analysis 
+
+In order to analyze the average age over time, I need to calculate the age of each laureate when they won the prize, then I can compute for every year, every category what the average age was.
+
+```{r}
+# initialize data frame for relevant info
+df <- data.frame(year = integer(),
+                 category = character(),
+                 age_average = double())
+
+for (i in 1:dim(prize$prizes)[1]){
+  # initialize counters
+  age_total <- 0
+  age_count <- 0 
+
+  # extract laureates dataframe
+  df_l <- prize$prizes$laureates[[i]]
+  
+  # check if no laureates that year/category
+  if (is_null(df_l[[1]]) == FALSE){
+    
+    # loop through all laureates that year/category
+    for (ii in 1:dim(df_l)[1]){
+      
+      # extract id of laureate
+      id <- df_l$id[ii]
+      
+      # find the gender of laureate
+      df_ii <- laur$laureates[which(laur$laureates$id == id), ]
+      
+      # extract birthyear
+      born <- str_extract(df_ii$born, "[0-9]+")
+      
+      # calculate age they were awarded the prize 
+      age_awarded <- as.integer(prize$prizes$year[i]) - as.integer(born)
+      if (is.na(age_awarded) == FALSE & age_awarded > 0 & age_awarded < 100) {
+        age_total <- age_total + age_awarded
+        age_count <- age_count + 1
+      }
+    }
+    # calculate average age
+    age_average = age_total/age_count
+    
+    # bind to dataframe
+    df_temp <- data.frame(year = as.integer(prize$prizes$year[i]),
+                          category = prize$prizes$category[i],
+                          age_average = age_average)
+    df <- rbind(df, df_temp)
+  }
+}
+```
+
+Now that all relevant data is extracted, make a plot.
+
+```{r, warning=FALSE}
+df |> ggplot(aes(x=year, y=age_average, color=category)) + 
+        geom_smooth(method = 'loess', formula = 'y ~ x') +
+        geom_point() + 
+        labs(title="Age of Nobel Laureates", x="Year", y = "Age")
+        
+         
+```
+
+Based on the plot, the average age of Nobel Laureates is generally over 50, and most categories have seen their average age increase - besides peace for which it has decreased.
+
+### Affiliation Analysis
+
+In order to calculate the affiliation that has the most laureates, I need to sum up the number of times each affiliation appears. First, I can extract all of the affiliations. 
+
+```{r}
+df <- data.frame(id = character(),
+                 affiliation = character())
+
+for (i in 1:dim(laur$laureates)[1]){
+  
+  # extract laureates dataframe
+  df_l <- laur$laureates$prizes[[i]]
+  
+  # loop through all prizes for that individual
+  for (ii in 1:dim(df_l)[1]){
+    # quick check
+    if (dim(df_l)[1] == length(df_l$affiliations))  {
+      if (is_empty(df_l$affiliations[[ii]][[1]])== FALSE){
+        df_temp <- data.frame(id = laur$laureates$id[i],
+                              affiliation = df_l$affiliations[[ii]][[1]])
+        df <- rbind(df, df_temp)
+      }
+    } else {
+      print(i)
+    }
+  }
+}
+```
+
+Now I can group by the affiliations and count them up.
+
+```{r}
+df_n <- df |> group_by(affiliation) |>
+      summarise(count = n()) |> 
+      arrange(desc(count))
+
+kable(head(df_n,5))  |>
+  kable_styling("striped")
+```
+
+The affiliation with the most Nobel mentions is the University of California - represented 39 times. 
+
+
+### Shares Analysis 
+
+For each year, category, laureate I can create an entry in a dataframe.
+
+```{r}
+# initialize data frame for relevant info
+df <- data.frame(year = integer(),
+                 category = character(),
+                 share = integer())
+
+for (i in 1:dim(prize$prizes)[1]){
+  
+  # extract laureates dataframe
+  df_l <- prize$prizes$laureates[[i]]
+  
+  # check if no laureates that year/category
+  if (is_null(df_l[[1]]) == FALSE){
+    
+    # loop through all laureates that year/category
+    for (ii in 1:dim(df_l)[1]){
+      
+      # extract id of laureate
+      share <- as.integer(df_l$share[ii])
+      
+      # bind to dataframe
+      df_temp <- data.frame(year = as.integer(prize$prizes$year[i]),
+                            category = prize$prizes$category[i],
+                            share = share)
+      df <- rbind(df, df_temp)
+    }
+  }
+}
+```
+
+Now I can inspect for each category that the Nobel Prize was awarded in, the most and the least amount of shares there has been.
+
+```{r}
+df_n <- df |> group_by(category) |>
+      summarise(max_shares = max(share),
+                min_shares = min(share)) |>
+      arrange(desc(max_shares))
+kable(head(df_n,5))  |>
+  kable_styling("striped")
+```
+Every category besides peace, had 4 shares as the maximum and 1 as the minimum - peace had 3 shares as the maximum. 
+
+## Conclusion
+
+In conclusion, I was able to use the API provided by Nobelprize.org to obtain the necessary information to answer the following questions:
+
+1) For each category that the Nobel Prize was awarded in, how has the gender breakdown changed over time?
+2) For each category that the Nobel Prize was awarded in, how has the average age changed over time?
+3) What affiliation has the most Nobel Laureates?
+4) For each category that the Nobel Prize was awarded in, what is the most and the least amount of shares there has been?
